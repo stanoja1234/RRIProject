@@ -3,6 +3,7 @@ package si.um.feri.bozinov;
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
+import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.Pixmap;
@@ -13,7 +14,14 @@ import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.scenes.scene2d.InputEvent;
+import com.badlogic.gdx.scenes.scene2d.Stage;
+import com.badlogic.gdx.scenes.scene2d.ui.*;
+import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
+import com.badlogic.gdx.utils.Align;
+import com.badlogic.gdx.utils.Json;
 import com.badlogic.gdx.utils.ScreenUtils;
+import com.badlogic.gdx.utils.viewport.ScreenViewport;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
@@ -35,6 +43,11 @@ public class SloveniaMap extends ApplicationAdapter {
     private BitmapFont titleFont;
     private BitmapFont smallFont;
     private BitmapFont largeFont;
+    private BitmapFont extraSmallFont;
+
+    // Scene2D for UI
+    private Stage stage;
+    private Skin skin;
 
     // Slovenia bounding box
     private static final double MIN_LON = 13.3;
@@ -54,8 +67,8 @@ public class SloveniaMap extends ApplicationAdapter {
 
     // Weather panel settings
     private static final int PANEL_WIDTH = 380;
-    private static final int PANEL_HEIGHT = 480;
-    private static final int PANEL_PADDING = 25;
+    private static final int PANEL_HEIGHT = 450;
+    private static final int PANEL_PADDING = 20;
     private static final int PANEL_MARGIN = 30;
 
     private List<City> cities;
@@ -64,8 +77,18 @@ public class SloveniaMap extends ApplicationAdapter {
     private float panelAnimationProgress = 0f;
     private float markerPulse = 0f;
 
+    // Edit mode
+    private boolean editMode = false;
+    private City hoveredCity = null;
+    private boolean awaitingLocationClick = false;
+    private Vector2 pendingLocation = null;
+
     private static final String GEOAPIFY_API_KEY = "930e7c22c63b486eac329474adc56afd";
     private static final String OPENWEATHER_API_KEY = "c55932282557548fa0e13cf7975bfc0d";
+    private static final String CITIES_FILE = "cities.json";
+
+    // Debug mode: set to true to use static data from JSON file instead of API calls
+    private static final boolean USE_STATIC_WEATHER_DATA = false;
 
     @Override
     public void create() {
@@ -89,6 +112,10 @@ public class SloveniaMap extends ApplicationAdapter {
         largeFont.setColor(Color.WHITE);
         largeFont.getData().setScale(3.5f);
 
+        extraSmallFont = new BitmapFont();
+        extraSmallFont.setColor(Color.WHITE);
+        extraSmallFont.getData().setScale(0.95f);
+
         // Setup map camera
         camera = new OrthographicCamera();
         camera.setToOrtho(false, MAP_WIDTH, MAP_HEIGHT);
@@ -100,7 +127,27 @@ public class SloveniaMap extends ApplicationAdapter {
         uiCamera = new OrthographicCamera();
         uiCamera.setToOrtho(false, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
 
-        initializeCities();
+        // Setup Scene2D
+        stage = new Stage(new ScreenViewport());
+        skin = new Skin(Gdx.files.internal("uiskin.json"));
+
+        // Create input multiplexer to handle both stage and map input
+        com.badlogic.gdx.InputMultiplexer multiplexer = new com.badlogic.gdx.InputMultiplexer();
+        multiplexer.addProcessor(stage);
+        multiplexer.addProcessor(new com.badlogic.gdx.InputAdapter() {
+            @Override
+            public boolean scrolled(float amountX, float amountY) {
+                return SloveniaMap.this.scrolled(amountX, amountY);
+            }
+        });
+        Gdx.input.setInputProcessor(multiplexer);
+
+        // Load or initialize cities
+        loadCitiesFromFile();
+        if (cities == null || cities.isEmpty()) {
+            initializeDefaultCities();
+            saveCitiesToFile();
+        }
 
         // Build Geoapify Static Maps API URL
         String mapUrl = buildGeoapifyUrl(MAP_WIDTH, MAP_HEIGHT);
@@ -113,10 +160,11 @@ public class SloveniaMap extends ApplicationAdapter {
             System.err.println("Failed to load map: " + e.getMessage());
             e.printStackTrace();
         }
+
         loadWeatherDataForAllCities();
     }
 
-    private void initializeCities() {
+    private void initializeDefaultCities() {
         cities = new ArrayList<>();
 
         // Major cities in Slovenia with their coordinates
@@ -137,9 +185,48 @@ public class SloveniaMap extends ApplicationAdapter {
         cities.add(new City("Krško", 45.9589, 15.4919));
     }
 
+    private void loadCitiesFromFile() {
+        try {
+            FileHandle file = Gdx.files.local(CITIES_FILE);
+            if (file.exists()) {
+                String jsonString = file.readString();
+                Json json = new Json();
+                cities = json.fromJson(ArrayList.class, City.class, jsonString);
+                System.out.println("Loaded " + cities.size() + " cities from file");
+            }
+        } catch (Exception e) {
+            System.err.println("Failed to load cities from file: " + e.getMessage());
+            cities = new ArrayList<>();
+        }
+    }
+
+    private void saveCitiesToFile() {
+        try {
+            Json json = new Json();
+            json.setUsePrototypes(false);
+            String jsonString = json.prettyPrint(cities);
+            FileHandle file = Gdx.files.local(CITIES_FILE);
+            file.writeString(jsonString, false);
+            System.out.println("Saved " + cities.size() + " cities to file");
+        } catch (Exception e) {
+            System.err.println("Failed to save cities to file: " + e.getMessage());
+        }
+    }
+
     private void loadWeatherDataForAllCities() {
+        if (USE_STATIC_WEATHER_DATA) {
+            System.out.println("Using static weather data from JSON file");
+            return; // Weather data already loaded from file
+        }
+
         new Thread(() -> {
             for (City city : cities) {
+                // Skip API call if city is marked as static
+                if (city.isStatic) {
+                    System.out.println("Skipping API call for static city: " + city.name);
+                    continue;
+                }
+
                 try {
                     loadWeatherData(city);
                     Thread.sleep(100);
@@ -236,9 +323,45 @@ public class SloveniaMap extends ApplicationAdapter {
         return new Vector2(x, y);
     }
 
+    private Vector2 screenToGeo(float x, float y) {
+        // Convert screen coordinates to geographic coordinates
+        double lon = MIN_LON + (x / MAP_WIDTH) * (MAX_LON - MIN_LON);
+        double lat = MIN_LAT + (y / MAP_HEIGHT) * (MAX_LAT - MIN_LAT);
+        return new Vector2((float)lat, (float)lon);
+    }
+
     private void handleInput() {
         float delta = Gdx.graphics.getDeltaTime();
         float moveAmount = PAN_SPEED * delta * camera.zoom;
+
+        // Toggle edit mode with 'E' key
+        if (Gdx.input.isKeyJustPressed(Input.Keys.E)) {
+            editMode = !editMode;
+            showWeatherPanel = false;
+            selectedCity = null;
+            awaitingLocationClick = false;
+            pendingLocation = null;
+            System.out.println("Edit mode: " + (editMode ? "ON" : "OFF"));
+        }
+
+        // Add new city with 'A' key in edit mode
+        if (editMode && Gdx.input.isKeyJustPressed(Input.Keys.A)) {
+            awaitingLocationClick = true;
+            pendingLocation = null;
+            System.out.println("Click on the map to select location for new city");
+        }
+
+        // Cancel location selection with ESC
+        if (awaitingLocationClick && Gdx.input.isKeyJustPressed(Input.Keys.ESCAPE)) {
+            awaitingLocationClick = false;
+            pendingLocation = null;
+            System.out.println("Location selection cancelled");
+        }
+
+        // Delete selected city with DELETE key in edit mode
+        if (editMode && selectedCity != null && Gdx.input.isKeyJustPressed(Input.Keys.FORWARD_DEL)) {
+            showDeleteConfirmDialog(selectedCity);
+        }
 
         // Panning with arrow keys
         if (Gdx.input.isKeyPressed(Input.Keys.LEFT)) {
@@ -285,8 +408,39 @@ public class SloveniaMap extends ApplicationAdapter {
 
         camera.update();
 
-        // Handle city clicks
-        if (Gdx.input.justTouched()) {
+        // Update hovered city
+        if (stage.getKeyboardFocus() == null && !awaitingLocationClick) {
+            Vector3 touchPos = new Vector3(Gdx.input.getX(), Gdx.input.getY(), 0);
+            camera.unproject(touchPos);
+            hoveredCity = null;
+
+            for (City city : cities) {
+                Vector2 cityPos = geoToScreen(city.lat, city.lon);
+                float distance = Vector2.dst(touchPos.x, touchPos.y, cityPos.x, cityPos.y);
+
+                if (distance < 15) {
+                    hoveredCity = city;
+                    break;
+                }
+            }
+        }
+
+        // Handle city clicks or location selection
+        if (Gdx.input.justTouched() && stage.getKeyboardFocus() == null) {
+            // If awaiting location click, capture the coordinates
+            if (awaitingLocationClick) {
+                Vector3 touchPos = new Vector3(Gdx.input.getX(), Gdx.input.getY(), 0);
+                camera.unproject(touchPos);
+
+                Vector2 geoCoords = screenToGeo(touchPos.x, touchPos.y);
+                pendingLocation = new Vector2(touchPos.x, touchPos.y);
+
+                // Show dialog with pre-filled coordinates
+                showAddCityDialog(geoCoords.x, geoCoords.y);
+                awaitingLocationClick = false;
+                return;
+            }
+
             // Check if clicking on close button of panel
             if (showWeatherPanel) {
                 float panelX = Gdx.graphics.getWidth() - PANEL_WIDTH - PANEL_MARGIN;
@@ -312,12 +466,415 @@ public class SloveniaMap extends ApplicationAdapter {
 
                 if (distance < 15) {
                     selectedCity = city;
-                    showWeatherPanel = city.weatherLoaded;
-                    panelAnimationProgress = 0f;
+
+                    if (editMode) {
+                        showEditCityDialog(city);
+                    } else {
+                        showWeatherPanel = city.weatherLoaded;
+                        panelAnimationProgress = 0f;
+                    }
                     break;
                 }
             }
         }
+    }
+
+    private void showAddCityDialog(final float lat, final float lon) {
+        Dialog dialog = new Dialog("Add New City", skin);
+
+        Table content = dialog.getContentTable();
+        content.pad(20);
+
+        final TextField nameField = new TextField("", skin);
+        nameField.setMessageText("City name");
+
+        final TextField latField = new TextField(String.format("%.4f", lat), skin);
+        latField.setMessageText("Latitude");
+
+        final TextField lonField = new TextField(String.format("%.4f", lon), skin);
+        lonField.setMessageText("Longitude");
+
+        content.add(new Label("City Name:", skin)).left().padBottom(5);
+        content.row();
+        content.add(nameField).width(300).padBottom(15);
+        content.row();
+        content.add(new Label("Latitude:", skin)).left().padBottom(5);
+        content.row();
+        content.add(latField).width(300).padBottom(15);
+        content.row();
+        content.add(new Label("Longitude:", skin)).left().padBottom(5);
+        content.row();
+        content.add(lonField).width(300).padBottom(15);
+        content.row();
+
+        Label hintLabel = new Label("(Coordinates from map click)", skin);
+        hintLabel.setColor(0.7f, 0.7f, 0.7f, 1f);
+        content.add(hintLabel).padBottom(10);
+
+        TextButton okButton = new TextButton("Add City", skin);
+        okButton.addListener(new ClickListener() {
+            @Override
+            public void clicked(InputEvent event, float x, float y) {
+                try {
+                    String name = nameField.getText().trim();
+                    double latVal = Double.parseDouble(latField.getText().trim());
+                    double lonVal = Double.parseDouble(lonField.getText().trim());
+
+                    if (name.isEmpty()) {
+                        showErrorDialog("Please enter a city name");
+                        return;
+                    }
+
+                    if (latVal < MIN_LAT || latVal > MAX_LAT || lonVal < MIN_LON || lonVal > MAX_LON) {
+                        showErrorDialog("Coordinates must be within Slovenia bounds:\n" +
+                            "Lat: " + MIN_LAT + " - " + MAX_LAT + "\n" +
+                            "Lon: " + MIN_LON + " - " + MAX_LON);
+                        return;
+                    }
+
+                    City newCity = new City(name, latVal, lonVal);
+                    cities.add(newCity);
+                    saveCitiesToFile();
+
+                    // Load weather data for new city (only if not in static mode)
+                    if (!USE_STATIC_WEATHER_DATA) {
+                        new Thread(() -> {
+                            try {
+                                loadWeatherData(newCity);
+                            } catch (Exception e) {
+                                System.err.println("Failed to load weather for new city: " + e.getMessage());
+                            }
+                        }).start();
+                    } else {
+                        System.out.println("Static mode: Skipping weather API call for new city");
+                    }
+
+                    dialog.hide();
+                    pendingLocation = null;
+                    showSuccessDialog("City '" + name + "' added successfully!");
+                } catch (NumberFormatException e) {
+                    showErrorDialog("Please enter valid numbers for coordinates");
+                }
+            }
+        });
+
+        TextButton cancelButton = new TextButton("Cancel", skin);
+        cancelButton.addListener(new ClickListener() {
+            @Override
+            public void clicked(InputEvent event, float x, float y) {
+                dialog.hide();
+                pendingLocation = null;
+            }
+        });
+
+        Table buttonTable = new Table();
+        buttonTable.add(okButton).width(120).padRight(10);
+        buttonTable.add(cancelButton).width(120);
+
+        content.row();
+        content.add(buttonTable).padTop(20);
+
+        dialog.key(Input.Keys.ESCAPE, false);
+        dialog.show(stage);
+    }
+
+    private void showEditCityDialog(final City city) {
+        Dialog dialog = new Dialog("Edit City: " + city.name, skin);
+        dialog.getTitleLabel().setAlignment(Align.center);
+
+        Table content = dialog.getContentTable();
+        content.pad(20);
+
+        // City name field
+        final TextField nameField = new TextField(city.name, skin);
+        content.add(new Label("City Name:", skin)).left().padBottom(5);
+        content.row();
+        content.add(nameField).width(300).padBottom(15);
+        content.row();
+
+        // Coordinates with "Pick on Map" button
+        final TextField latField = new TextField(String.valueOf(city.lat), skin);
+        final TextField lonField = new TextField(String.valueOf(city.lon), skin);
+
+        content.add(new Label("Latitude:", skin)).left().padBottom(5);
+        content.row();
+
+        Table latTable = new Table();
+        latTable.add(latField).width(200).padRight(10);
+
+        TextButton pickLatLonButton = new TextButton("Pick on Map", skin);
+        pickLatLonButton.addListener(new ClickListener() {
+            @Override
+            public void clicked(InputEvent event, float x, float y) {
+                // Hide the dialog temporarily
+                dialog.hide();
+
+                // Enter location selection mode
+                awaitingLocationClick = true;
+                pendingLocation = null;
+
+                // Store reference to update fields later
+                final Dialog parentDialog = dialog;
+
+                System.out.println("Click on map to update city location");
+
+                // We'll need to create a callback mechanism
+                // For now, we'll use a simple flag-based approach
+                new Thread(() -> {
+                    // Wait for location to be selected
+                    while (awaitingLocationClick && pendingLocation == null) {
+                        try {
+                            Thread.sleep(100);
+                        } catch (InterruptedException e) {
+                            break;
+                        }
+                    }
+
+                    // Update fields if location was selected
+                    if (pendingLocation != null) {
+                        Gdx.app.postRunnable(() -> {
+                            Vector2 geoCoords = screenToGeo(pendingLocation.x, pendingLocation.y);
+                            latField.setText(String.format("%.4f", geoCoords.x));
+                            lonField.setText(String.format("%.4f", geoCoords.y));
+                            pendingLocation = null;
+                            awaitingLocationClick = false;
+
+                            // Show the dialog again
+                            parentDialog.show(stage);
+                        });
+                    }
+                }).start();
+            }
+        });
+
+        latTable.add(pickLatLonButton).width(90);
+        content.add(latTable).padBottom(10);
+        content.row();
+
+        content.add(new Label("Longitude:", skin)).left().padBottom(5);
+        content.row();
+        content.add(lonField).width(300).padBottom(20);
+        content.row();
+
+        // Static mode checkbox
+        final CheckBox staticCheckBox = new CheckBox(" Use Static Weather Data", skin);
+        staticCheckBox.setChecked(city.isStatic);
+        content.add(staticCheckBox).left().padBottom(20);
+        content.row();
+
+        // Weather data fields (only editable when static mode is on)
+        Label weatherLabel = new Label("Weather Data (editable when static):", skin);
+        weatherLabel.setColor(0.7f, 0.7f, 0.7f, 1f);
+        content.add(weatherLabel).left().padBottom(10);
+        content.row();
+
+        final TextField tempField = new TextField(
+            city.weatherLoaded ? String.format("%.1f", city.temperature) : "0.0", skin);
+        tempField.setDisabled(!city.isStatic);
+        content.add(new Label("Temperature (°C):", skin)).left().padBottom(5);
+        content.row();
+        content.add(tempField).width(300).padBottom(10);
+        content.row();
+
+        final TextField humidityField = new TextField(
+            city.weatherLoaded ? String.valueOf(city.humidity) : "0", skin);
+        humidityField.setDisabled(!city.isStatic);
+        content.add(new Label("Humidity (%):", skin)).left().padBottom(5);
+        content.row();
+        content.add(humidityField).width(300).padBottom(10);
+        content.row();
+
+        final TextField pressureField = new TextField(
+            city.weatherLoaded ? String.valueOf(city.pressure) : "0", skin);
+        pressureField.setDisabled(!city.isStatic);
+        content.add(new Label("Pressure (hPa):", skin)).left().padBottom(5);
+        content.row();
+        content.add(pressureField).width(300).padBottom(10);
+        content.row();
+
+        final TextField windSpeedField = new TextField(
+            city.weatherLoaded ? String.format("%.1f", city.windSpeed) : "0.0", skin);
+        windSpeedField.setDisabled(!city.isStatic);
+        content.add(new Label("Wind Speed (m/s):", skin)).left().padBottom(5);
+        content.row();
+        content.add(windSpeedField).width(300).padBottom(10);
+        content.row();
+
+        final TextField descriptionField = new TextField(
+            city.weatherLoaded ? city.description : "", skin);
+        descriptionField.setDisabled(!city.isStatic);
+        content.add(new Label("Description:", skin)).left().padBottom(5);
+        content.row();
+        content.add(descriptionField).width(300).padBottom(10);
+        content.row();
+
+        final TextField iconField = new TextField(
+            city.weatherLoaded ? city.icon : "01d", skin);
+        iconField.setDisabled(!city.isStatic);
+        content.add(new Label("Icon Code:", skin)).left().padBottom(5);
+        content.row();
+        content.add(iconField).width(300).padBottom(15);
+        content.row();
+
+        // Enable/disable weather fields based on static checkbox
+        staticCheckBox.addListener(new ClickListener() {
+            @Override
+            public void clicked(InputEvent event, float x, float y) {
+                boolean isStatic = staticCheckBox.isChecked();
+                tempField.setDisabled(!isStatic);
+                humidityField.setDisabled(!isStatic);
+                pressureField.setDisabled(!isStatic);
+                windSpeedField.setDisabled(!isStatic);
+                descriptionField.setDisabled(!isStatic);
+                iconField.setDisabled(!isStatic);
+            }
+        });
+
+        Table buttonTable = new Table();
+
+        TextButton saveButton = new TextButton("Save", skin);
+        saveButton.addListener(new ClickListener() {
+            @Override
+            public void clicked(InputEvent event, float x, float y) {
+                try {
+                    String newName = nameField.getText().trim();
+                    double newLat = Double.parseDouble(latField.getText().trim());
+                    double newLon = Double.parseDouble(lonField.getText().trim());
+
+                    if (newName.isEmpty()) {
+                        showErrorDialog("Please enter a city name");
+                        return;
+                    }
+
+                    if (newLat < MIN_LAT || newLat > MAX_LAT || newLon < MIN_LON || newLon > MAX_LON) {
+                        showErrorDialog("Coordinates must be within Slovenia bounds:\n" +
+                            "Lat: " + MIN_LAT + " - " + MAX_LAT + "\n" +
+                            "Lon: " + MIN_LON + " - " + MAX_LON);
+                        return;
+                    }
+
+                    // Update basic city info
+                    city.name = newName;
+                    city.lat = newLat;
+                    city.lon = newLon;
+                    city.isStatic = staticCheckBox.isChecked();
+
+                    // If static mode is enabled, update weather data from fields
+                    if (city.isStatic) {
+                        try {
+                            city.temperature = Double.parseDouble(tempField.getText().trim());
+                            city.humidity = Integer.parseInt(humidityField.getText().trim());
+                            city.pressure = Integer.parseInt(pressureField.getText().trim());
+                            city.windSpeed = Double.parseDouble(windSpeedField.getText().trim());
+                            city.description = descriptionField.getText().trim();
+                            city.icon = iconField.getText().trim();
+                            city.weatherLoaded = true;
+
+                            System.out.println("Updated static weather data for " + city.name);
+                        } catch (NumberFormatException e) {
+                            showErrorDialog("Please enter valid numbers for weather data");
+                            return;
+                        }
+                    } else if (!USE_STATIC_WEATHER_DATA) {
+                        // If not static and not in global static mode, reload from API
+                        new Thread(() -> {
+                            try {
+                                loadWeatherData(city);
+                            } catch (Exception e) {
+                                System.err.println("Failed to reload weather: " + e.getMessage());
+                            }
+                        }).start();
+                    }
+
+                    saveCitiesToFile();
+                    dialog.hide();
+                    showSuccessDialog("City updated successfully!");
+                } catch (NumberFormatException e) {
+                    showErrorDialog("Please enter valid numbers for coordinates");
+                }
+            }
+        });
+
+        TextButton deleteButton = new TextButton("Delete", skin);
+        deleteButton.addListener(new ClickListener() {
+            @Override
+            public void clicked(InputEvent event, float x, float y) {
+                dialog.hide();
+                showDeleteConfirmDialog(city);
+            }
+        });
+
+        TextButton cancelButton = new TextButton("Cancel", skin);
+        cancelButton.addListener(new ClickListener() {
+            @Override
+            public void clicked(InputEvent event, float x, float y) {
+                dialog.hide();
+                awaitingLocationClick = false;
+                pendingLocation = null;
+            }
+        });
+
+        buttonTable.add(saveButton).width(100).padRight(10);
+        buttonTable.add(deleteButton).width(100).padRight(10);
+        buttonTable.add(cancelButton).width(100);
+
+        content.row();
+        content.add(buttonTable).padTop(20);
+
+        dialog.key(Input.Keys.ESCAPE, false);
+        dialog.show(stage);
+    }
+
+    private void showDeleteConfirmDialog(final City city) {
+        Dialog dialog = new Dialog("Confirm Delete", skin) {
+            @Override
+            protected void result(Object object) {
+                if (object != null && (Boolean) object) {
+                    cities.remove(city);
+                    saveCitiesToFile();
+                    if (selectedCity == city) {
+                        selectedCity = null;
+                        showWeatherPanel = false;
+                    }
+                    showSuccessDialog("City '" + city.name + "' deleted successfully!");
+                }
+            }
+        };
+
+        dialog.text("Are you sure you want to delete\n'" + city.name + "'?");
+        dialog.button("Delete", true);
+        dialog.button("Cancel", false);
+        dialog.key(Input.Keys.ENTER, true);
+        dialog.key(Input.Keys.ESCAPE, false);
+        dialog.show(stage);
+    }
+
+    private void showErrorDialog(String message) {
+        Dialog dialog = new Dialog("Error", skin) {
+            @Override
+            protected void result(Object object) {
+                // Just close the dialog
+            }
+        };
+        dialog.text(message);
+        dialog.button("OK", true);
+        dialog.key(Input.Keys.ENTER, true);
+        dialog.key(Input.Keys.ESCAPE, true);
+        dialog.show(stage);
+    }
+
+    private void showSuccessDialog(String message) {
+        Dialog dialog = new Dialog("Success", skin) {
+            @Override
+            protected void result(Object object) {
+                // Just close the dialog
+            }
+        };
+        dialog.text(message);
+        dialog.button("OK", true);
+        dialog.key(Input.Keys.ENTER, true);
+        dialog.key(Input.Keys.ESCAPE, true);
+        dialog.show(stage);
     }
 
     @Override
@@ -343,6 +900,24 @@ public class SloveniaMap extends ApplicationAdapter {
         }
         batch.end();
 
+        // Draw pending location marker
+        if (awaitingLocationClick && pendingLocation != null) {
+            shapeRenderer.setProjectionMatrix(camera.combined);
+            shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
+
+            float pulseSize = 20 + (float)Math.sin(markerPulse * 3) * 5;
+            shapeRenderer.setColor(0.2f, 1f, 0.4f, 0.3f);
+            shapeRenderer.circle(pendingLocation.x, pendingLocation.y, pulseSize);
+
+            shapeRenderer.setColor(0.2f, 1f, 0.4f, 0.8f);
+            shapeRenderer.circle(pendingLocation.x, pendingLocation.y, 12);
+
+            shapeRenderer.setColor(1f, 1f, 1f, 1f);
+            shapeRenderer.circle(pendingLocation.x, pendingLocation.y, 8);
+
+            shapeRenderer.end();
+        }
+
         // Draw city markers with improved styling
         shapeRenderer.setProjectionMatrix(camera.combined);
         shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
@@ -350,13 +925,20 @@ public class SloveniaMap extends ApplicationAdapter {
         for (City city : cities) {
             Vector2 pos = geoToScreen(city.lat, city.lon);
             boolean isSelected = (city == selectedCity);
+            boolean isHovered = (city == hoveredCity);
 
-            // Outer glow for selected city
-            if (isSelected) {
+            // Outer glow for selected or hovered city
+            if (isSelected || isHovered) {
                 float pulseSize = 20 + (float)Math.sin(markerPulse) * 3;
                 Color tempColor = getTemperatureColor(city.temperature);
                 shapeRenderer.setColor(tempColor.r, tempColor.g, tempColor.b, 0.3f);
                 shapeRenderer.circle(pos.x, pos.y, pulseSize);
+            }
+
+            // Edit mode indicator
+            if (editMode) {
+                shapeRenderer.setColor(1f, 0.8f, 0.2f, 0.4f);
+                shapeRenderer.circle(pos.x, pos.y, 16);
             }
 
             // Shadow
@@ -391,7 +973,7 @@ public class SloveniaMap extends ApplicationAdapter {
         batch.setProjectionMatrix(camera.combined);
         batch.begin();
         for (City city : cities) {
-            if (city == selectedCity || camera.zoom < 0.7f) {
+            if (city == selectedCity || city == hoveredCity || camera.zoom < 0.7f) {
                 Vector2 pos = geoToScreen(city.lat, city.lon);
 
                 // Text shadow
@@ -406,12 +988,79 @@ public class SloveniaMap extends ApplicationAdapter {
         batch.end();
 
         // Draw weather panel if a city is selected
-        if (showWeatherPanel && selectedCity != null && selectedCity.weatherLoaded) {
+        if (showWeatherPanel && selectedCity != null && selectedCity.weatherLoaded && !editMode) {
             drawWeatherPanel();
         }
 
         // Draw control hints
         drawControlHints();
+
+        // Draw edit mode indicator
+        if (editMode) {
+            drawEditModeIndicator();
+        }
+
+        // Draw location selection indicator
+        if (awaitingLocationClick) {
+            drawLocationSelectionIndicator();
+        }
+
+        // Draw and update Stage
+        stage.act(delta);
+        stage.draw();
+    }
+
+    private void drawLocationSelectionIndicator() {
+        batch.setProjectionMatrix(uiCamera.combined);
+        shapeRenderer.setProjectionMatrix(uiCamera.combined);
+
+        float barWidth = 350;
+        float barHeight = 50;
+        float barX = (Gdx.graphics.getWidth() - barWidth) / 2;
+        float barY = Gdx.graphics.getHeight() - barHeight - 70;
+
+        // Background with pulsing effect
+        shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
+        float pulse = 0.8f + (float)Math.sin(markerPulse * 2) * 0.2f;
+        shapeRenderer.setColor(0.2f * pulse, 1f * pulse, 0.4f * pulse, 0.9f);
+        shapeRenderer.rect(barX, barY, barWidth, barHeight);
+        shapeRenderer.setColor(0.4f, 1f, 0.6f, 1f);
+        shapeRenderer.rect(barX, barY + barHeight - 3, barWidth, 3);
+        shapeRenderer.end();
+
+        // Text
+        batch.begin();
+        font.setColor(0.05f, 0.05f, 0.05f, 1f);
+        font.draw(batch, "Click on map to select location", barX + 45, barY + 32);
+        extraSmallFont.setColor(0.15f, 0.15f, 0.15f, 1f);
+        extraSmallFont.draw(batch, "ESC to cancel", barX + 125, barY + 14);
+        batch.end();
+    }
+
+    private void drawEditModeIndicator() {
+        batch.setProjectionMatrix(uiCamera.combined);
+        shapeRenderer.setProjectionMatrix(uiCamera.combined);
+
+        float barWidth = 200;
+        float barHeight = 50;
+        float barX = (Gdx.graphics.getWidth() - barWidth) / 2;
+        float barY = Gdx.graphics.getHeight() - barHeight - 10;
+
+        // Background
+        shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
+        shapeRenderer.setColor(1f, 0.8f, 0.2f, 0.9f);
+        shapeRenderer.rect(barX, barY, barWidth, barHeight);
+        shapeRenderer.setColor(1f, 0.9f, 0.4f, 1f);
+        shapeRenderer.rect(barX, barY + barHeight - 3, barWidth, 3);
+        shapeRenderer.end();
+
+        // Text
+        batch.begin();
+        font.setColor(0.1f, 0.1f, 0.1f, 1f);
+        font.draw(batch, "EDIT MODE", barX + 50, barY + 32);
+        extraSmallFont.setColor(0.2f, 0.2f, 0.2f, 1f);
+        extraSmallFont.draw(batch, "A: Add  Del: Delete  Click: Edit", barX + 12, barY + 14);
+        batch.end();
     }
 
     private void drawWeatherPanel() {
@@ -488,7 +1137,7 @@ public class SloveniaMap extends ApplicationAdapter {
         largeFont.setColor(Color.WHITE);
         largeFont.draw(batch, tempText, textX, textY);
 
-        // Draw "C" for Celsius next to temperature
+        // Draw "°C" for Celsius next to temperature
         titleFont.setColor(new Color(0.8f, 0.8f, 0.8f, 1f));
         titleFont.draw(batch, "C", textX + 90, textY - 10);
 
@@ -600,8 +1249,10 @@ public class SloveniaMap extends ApplicationAdapter {
         batch.begin();
 
         smallFont.setColor(new Color(1f, 1f, 1f, 0.7f));
-        String hints = "Arrow Keys: Pan  |  +/- : Zoom  |  Click City: Weather Info";
-        float textWidth = 400; // Approximate
+        String hints = editMode ?
+            "Arrow Keys: Pan  |  +/-: Zoom  |  A: Click Map to Add  |  Click City: Edit  |  Del: Delete  |  E: Exit Edit" :
+            "Arrow Keys: Pan  |  +/-: Zoom  |  Click City: Weather Info  |  E: Edit Mode";
+        float textWidth = 700; // Approximate
         smallFont.draw(batch, hints,
             (Gdx.graphics.getWidth() - textWidth) / 2,
             30);
@@ -635,6 +1286,12 @@ public class SloveniaMap extends ApplicationAdapter {
     }
 
     @Override
+    public void resize(int width, int height) {
+        stage.getViewport().update(width, height, true);
+        uiCamera.setToOrtho(false, width, height);
+    }
+
+    @Override
     public void dispose() {
         if (batch != null) {
             batch.dispose();
@@ -656,6 +1313,12 @@ public class SloveniaMap extends ApplicationAdapter {
         }
         if (largeFont != null) {
             largeFont.dispose();
+        }
+        if (stage != null) {
+            stage.dispose();
+        }
+        if (skin != null) {
+            skin.dispose();
         }
     }
 

@@ -1,21 +1,36 @@
 package si.um.feri.bozinov;
 
 public class City {
-    String name;
-    double lat,lon;
+    public String name;
+    public double lat;
+    public double lon;
 
-    //Weather Data
-    double temperature;
-    int humidity;
-    int pressure;
-    double windSpeed;
-    String description;
-    String icon;
-    boolean weatherLoaded =false;
+    // Weather data
+    public double temperature;
+    public int humidity;
+    public int pressure;
+    public double windSpeed;
+    public String description;
+    public String icon;
+    public boolean weatherLoaded;
 
-    City(String name, double lat,double lon){
+
+    public boolean isStatic;
+
+
+    // Empty constructor for JSON serialization
+    public City() {
+    }
+
+    public City(String name, double lat, double lon) {
         this.name = name;
         this.lat = lat;
         this.lon = lon;
+        this.weatherLoaded = false;
+    }
+
+    @Override
+    public String toString() {
+        return name + " (" + String.format("%.4f", lat) + ", " + String.format("%.4f", lon) + ")";
     }
 }
