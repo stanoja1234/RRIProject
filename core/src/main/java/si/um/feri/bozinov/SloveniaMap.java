@@ -48,7 +48,7 @@ public class SloveniaMap extends ApplicationAdapter {
     // Scene2D for UI
     private Stage stage;
     private Skin skin;
-
+    private java.util.function.Consumer<Vector2> locationPickCallback = null;
     // Slovenia bounding box
     private static final double MIN_LON = 13.3;
     private static final double MAX_LON = 16.6;
@@ -436,8 +436,13 @@ public class SloveniaMap extends ApplicationAdapter {
                 pendingLocation = new Vector2(touchPos.x, touchPos.y);
 
                 // Show dialog with pre-filled coordinates
-                showAddCityDialog(geoCoords.x, geoCoords.y);
-                awaitingLocationClick = false;
+                if (locationPickCallback != null) {
+                    locationPickCallback.accept(geoCoords);
+                } else {
+                    // No callback means we're adding a new city
+                    showAddCityDialog(geoCoords.x, geoCoords.y);
+                    awaitingLocationClick = false;
+                }
                 return;
             }
 
@@ -609,41 +614,29 @@ public class SloveniaMap extends ApplicationAdapter {
                 // Hide the dialog temporarily
                 dialog.hide();
 
-                // Enter location selection mode
+                // Enter location selection mode with callback
                 awaitingLocationClick = true;
                 pendingLocation = null;
 
-                // Store reference to update fields later
-                final Dialog parentDialog = dialog;
+                // Set up callback to handle the selected location
+                locationPickCallback = new java.util.function.Consumer<Vector2>() {
+                    @Override
+                    public void accept(Vector2 geoCoords) {
+                        // Update the text fields with new coordinates
+                        latField.setText(String.format("%.4f", geoCoords.x));
+                        lonField.setText(String.format("%.4f", geoCoords.y));
+
+                        // Clear the callback and pending location
+                        locationPickCallback = null;
+                        pendingLocation = null;
+                        awaitingLocationClick = false;
+
+                        // Show the dialog again
+                        dialog.show(stage);
+                    }
+                };
 
                 System.out.println("Click on map to update city location");
-
-                // We'll need to create a callback mechanism
-                // For now, we'll use a simple flag-based approach
-                new Thread(() -> {
-                    // Wait for location to be selected
-                    while (awaitingLocationClick && pendingLocation == null) {
-                        try {
-                            Thread.sleep(100);
-                        } catch (InterruptedException e) {
-                            break;
-                        }
-                    }
-
-                    // Update fields if location was selected
-                    if (pendingLocation != null) {
-                        Gdx.app.postRunnable(() -> {
-                            Vector2 geoCoords = screenToGeo(pendingLocation.x, pendingLocation.y);
-                            latField.setText(String.format("%.4f", geoCoords.x));
-                            lonField.setText(String.format("%.4f", geoCoords.y));
-                            pendingLocation = null;
-                            awaitingLocationClick = false;
-
-                            // Show the dialog again
-                            parentDialog.show(stage);
-                        });
-                    }
-                }).start();
             }
         });
 
@@ -811,6 +804,7 @@ public class SloveniaMap extends ApplicationAdapter {
                 dialog.hide();
                 awaitingLocationClick = false;
                 pendingLocation = null;
+                locationPickCallback = null; // Clear callback
             }
         });
 

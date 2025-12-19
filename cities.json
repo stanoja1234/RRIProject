@@ -7,7 +7,7 @@
 	temperature: 6.03
 	humidity: 91
 	pressure: 1024
-	windSpeed: 1.03
+	windSpeed: 0.94
 	description: scattered clouds
 	icon: 03n
 	weatherLoaded: true
@@ -32,12 +32,12 @@
 	name: Celje
 	lat: 46.2395
 	lon: 15.2675
-	temperature: 10.41
+	temperature: 9.77
 	humidity: 78
 	pressure: 1024
-	windSpeed: 1.3
-	description: broken clouds
-	icon: 04n
+	windSpeed: 1.13
+	description: scattered clouds
+	icon: 03n
 	weatherLoaded: true
 	isStatic: false
 }
@@ -46,8 +46,8 @@
 	name: Kranj
 	lat: 46.2384
 	lon: 14.3555
-	temperature: 4.77
-	humidity: 93
+	temperature: 4.68
+	humidity: 94
 	pressure: 1024
 	windSpeed: 1.09
 	description: broken clouds
@@ -60,7 +60,7 @@
 	name: Koper
 	lat: 45.5469
 	lon: 13.7301
-	temperature: 10.96
+	temperature: 10.97
 	humidity: 93
 	pressure: 1026
 	windSpeed: 0
@@ -74,8 +74,8 @@
 	name: Novo Mesto
 	lat: 45.8039
 	lon: 15.1696
-	temperature: 11.22
-	humidity: 91
+	temperature: 11.19
+	humidity: 93
 	pressure: 1024
 	windSpeed: 0.81
 	description: broken clouds
@@ -88,12 +88,12 @@
 	name: Velenje
 	lat: 46.3809
 	lon: 15.0985
-	temperature: 7.34
-	humidity: 91
-	pressure: 1024
-	windSpeed: 1.16
-	description: few clouds
-	icon: 02n
+	temperature: 6.78
+	humidity: 89
+	pressure: 1025
+	windSpeed: 1.04
+	description: clear sky
+	icon: 01n
 	weatherLoaded: true
 	isStatic: false
 }
@@ -102,12 +102,12 @@
 	name: Nova Gorica
 	lat: 45.9556
 	lon: 13.6475
-	temperature: 9.15
+	temperature: 9.11
 	humidity: 95
 	pressure: 1025
-	windSpeed: 1.34
-	description: broken clouds
-	icon: 04n
+	windSpeed: 1.79
+	description: scattered clouds
+	icon: 03n
 	weatherLoaded: true
 	isStatic: false
 }
@@ -130,10 +130,10 @@
 	name: Murska Sobota
 	lat: 46.6611
 	lon: 16.1664
-	temperature: 4.01
-	humidity: 95
+	temperature: 3.46
+	humidity: 93
 	pressure: 1025
-	windSpeed: 1.71
+	windSpeed: 1.47
 	description: clear sky
 	icon: 01n
 	weatherLoaded: true
@@ -144,7 +144,7 @@
 	name: Slovenj Gradec
 	lat: 46.5101
 	lon: 15.0798
-	temperature: 3.45
+	temperature: 3.41
 	humidity: 94
 	pressure: 1024
 	windSpeed: 1.26
@@ -156,14 +156,14 @@
 {
 	class: si.um.feri.bozinov.City
 	name: Kamnik
-	lat: 46.2258
-	lon: 14.6083
-	temperature: 4.73
-	humidity: 88
-	pressure: 1024
-	windSpeed: 1.19
-	description: broken clouds
-	icon: 04n
+	lat: 46.2026
+	lon: 14.9414
+	temperature: 6.19
+	humidity: 89
+	pressure: 1025
+	windSpeed: 0.45
+	description: scattered clouds
+	icon: 03n
 	weatherLoaded: true
 	isStatic: false
 }
@@ -172,8 +172,8 @@
 	name: Jesenice
 	lat: 46.4297
 	lon: 14.0531
-	temperature: 2.73
-	humidity: 93
+	temperature: 2.64
+	humidity: 92
 	pressure: 1025
 	windSpeed: 0.97
 	description: scattered clouds
@@ -188,7 +188,7 @@
 	lon: 13.6614
 	temperature: 10.99
 	humidity: 93
-	pressure: 1026
+	pressure: 1025
 	windSpeed: 0
 	description: broken clouds
 	icon: 04n
@@ -202,7 +202,7 @@
 	lon: 15.4919
 	temperature: 6.9
 	humidity: 93
-	pressure: 1025
+	pressure: 1024
 	windSpeed: 2.06
 	description: few clouds
 	icon: 02n
@@ -222,5 +222,19 @@
 	icon: 04n
 	weatherLoaded: true
 	isStatic: true
+}
+{
+	class: si.um.feri.bozinov.City
+	name: testforclickonmapCallback
+	lat: 46.3
+	lon: 15.2505
+	temperature: -2.09
+	humidity: 94
+	pressure: 1025
+	windSpeed: 0.76
+	description: few clouds
+	icon: 02n
+	weatherLoaded: true
+	isStatic: false
 }
 ]
