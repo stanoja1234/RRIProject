@@ -14,14 +14,23 @@ public class ParticleEffectsManager {
     private boolean enabled = true;
 
     // Particle generation rates
-    private static final int MAX_PARTICLES_PER_CITY = 50;
-    private static final float PARTICLE_SPAWN_RATE = 0.1f; // seconds between spawns
+    private static final int MAX_PARTICLES_PER_CITY = 100;
+    private static final float PARTICLE_SPAWN_RATE = 0.05f; // seconds between spawns (faster for continuous effect)
 
     private float spawnTimer = 0f;
+    private City focusedCity = null; // Only spawn particles for this city
 
     public ParticleEffectsManager(MapRenderer mapRenderer) {
         this.mapRenderer = mapRenderer;
         this.particles = new ArrayList<>();
+    }
+
+    public void setFocusedCity(City city) {
+        this.focusedCity = city;
+        if (city == null) {
+            // Clear all particles when no city is focused
+            particles.clear();
+        }
     }
 
     public void update(float delta, List<City> cities, boolean airQualityMode) {
@@ -29,14 +38,12 @@ public class ParticleEffectsManager {
 
         spawnTimer += delta;
 
-        // Spawn new particles
-        if (spawnTimer >= PARTICLE_SPAWN_RATE) {
+        // Spawn new particles only for focused city
+        if (spawnTimer >= PARTICLE_SPAWN_RATE && focusedCity != null) {
             spawnTimer = 0f;
-            for (City city : cities) {
-                int cityParticleCount = countParticlesForCity(city);
-                if (cityParticleCount < MAX_PARTICLES_PER_CITY) {
-                    spawnParticlesForCity(city, airQualityMode);
-                }
+            int cityParticleCount = countParticlesForCity(focusedCity);
+            if (cityParticleCount < MAX_PARTICLES_PER_CITY) {
+                spawnParticlesForCity(focusedCity, airQualityMode);
             }
         }
 
@@ -75,26 +82,25 @@ public class ParticleEffectsManager {
         String description = city.description.toLowerCase();
         double temp = city.temperature;
 
-        // Rain particles
+        // Rain particles - always spawn multiple for looping effect
         if (description.contains("rain") || description.contains("drizzle")) {
-            int count = description.contains("heavy") ? 3 : 1;
+            int count = 5;
             for (int i = 0; i < count; i++) {
                 particles.add(createRainParticle(cityPos, city.windSpeed));
             }
         }
-        // Snow particles
-        else if (description.contains("snow") || (temp < 0 && description.contains("cloud"))) {
-            int count = temp < -5 ? 2 : 1;
+        // Snow particles - always spawn multiple for looping effect
+        else if (description.contains("snow") || (temp < -10 && description.contains("cloud"))) {
+            int count = temp < -5 ? 4 : 2;
             for (int i = 0; i < count; i++) {
                 particles.add(createSnowParticle(cityPos, city.windSpeed));
             }
         }
-        // Fog/mist particles
-        else if (description.contains("fog") || description.contains("mist") || city.humidity > 90) {
-            particles.add(createFogParticle(cityPos));
-        }
+//        else if (description.contains("fog") || description.contains("mist") || city.humidity > 95) {
+//            particles.add(createFogParticle(cityPos));
+//        }
         // Cloud particles for cloudy weather
-        else if (description.contains("cloud")) {
+         if (description.contains("cloud")) {
             if (MathUtils.random() < 0.3f) { // 30% chance
                 particles.add(createCloudParticle(cityPos, city.windSpeed));
             }
@@ -105,7 +111,8 @@ public class ParticleEffectsManager {
                 particles.add(createHeatShimmerParticle(cityPos));
             }
         }
-        // Wind particles for windy conditions
+
+        // Wind particles for windy conditions (can appear with rain/snow)
         if (city.windSpeed > 8) {
             if (MathUtils.random() < 0.5f) {
                 particles.add(createWindParticle(cityPos, city.windSpeed));
@@ -142,8 +149,8 @@ public class ParticleEffectsManager {
     // ===== WEATHER PARTICLE CREATORS =====
 
     private Particle createRainParticle(Vector2 cityPos, double windSpeed) {
-        float offsetX = MathUtils.random(-40f, 40f);
-        float offsetY = MathUtils.random(30f, 60f);
+        float offsetX = MathUtils.random(-60f, 60f);
+        float offsetY = MathUtils.random(40f, 80f);
         float x = cityPos.x + offsetX;
         float y = cityPos.y + offsetY;
 
@@ -155,8 +162,8 @@ public class ParticleEffectsManager {
     }
 
     private Particle createSnowParticle(Vector2 cityPos, double windSpeed) {
-        float offsetX = MathUtils.random(-50f, 50f);
-        float offsetY = MathUtils.random(30f, 70f);
+        float offsetX = MathUtils.random(-70f, 70f);
+        float offsetY = MathUtils.random(40f, 90f);
         float x = cityPos.x + offsetX;
         float y = cityPos.y + offsetY;
 
@@ -241,11 +248,11 @@ public class ParticleEffectsManager {
     }
 
     private int countParticlesForCity(City city) {
-        // Count particles near this city (within 100 pixels)
+        // Count particles near this city (within 150 pixels for larger spawn area)
         Vector2 cityPos = mapRenderer.geoToScreen(city.lat, city.lon);
         int count = 0;
         for (Particle particle : particles) {
-            if (Vector2.dst(particle.x, particle.y, cityPos.x, cityPos.y) < 100) {
+            if (Vector2.dst(particle.x, particle.y, cityPos.x, cityPos.y) < 150) {
                 count++;
             }
         }
@@ -432,7 +439,7 @@ public class ParticleEffectsManager {
             this.velocityX = velocity;
             this.velocityY = MathUtils.random(-5f, 5f);
             this.color = new Color(0.9f, 0.95f, 1f, 0.4f);
-            this.size = MathUtils.random(2f, 4f);
+            this.size = MathUtils.random(4f, 8f);
         }
 
         @Override

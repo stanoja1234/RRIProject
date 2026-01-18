@@ -98,6 +98,7 @@ public class SloveniaMap extends ApplicationAdapter {
     private AirQualityDataManager airQualityDataManager;
     private MapRenderer mapRenderer;
     private UIRenderer uiRenderer;
+    private ParticleEffectsManager particleEffectsManager;
 
     @Override
     public void create() {
@@ -155,6 +156,7 @@ public class SloveniaMap extends ApplicationAdapter {
         airQualityDataManager = new AirQualityDataManager();
         mapRenderer = new MapRenderer(shapeRenderer, smallFont);
         uiRenderer = new UIRenderer(shapeRenderer, batch, font, titleFont, smallFont, largeFont, extraSmallFont);
+        particleEffectsManager = new ParticleEffectsManager(mapRenderer);
 
         // Load or initialize cities
         loadCitiesFromFile();
@@ -305,6 +307,8 @@ public class SloveniaMap extends ApplicationAdapter {
         // Start animation
         isAnimatingCamera = true;
         cameraAnimationProgress = 0f;
+        particleEffectsManager.setFocusedCity(city);
+
     }
 
     private void updateCameraAnimation(float delta) {
@@ -362,6 +366,12 @@ public class SloveniaMap extends ApplicationAdapter {
             System.out.println("Edit mode: " + (editMode ? "ON" : "OFF"));
         }
 
+        // Toggle particle effects with 'P' key
+        if (Gdx.input.isKeyJustPressed(Input.Keys.P)) {
+            particleEffectsManager.setEnabled(!particleEffectsManager.isEnabled());
+            System.out.println("Particle effects: " + (particleEffectsManager.isEnabled() ? "ON" : "OFF"));
+        }
+
         // Add new city with 'A' key in edit mode
         if (editMode && Gdx.input.isKeyJustPressed(Input.Keys.A)) {
             awaitingLocationClick = true;
@@ -411,6 +421,7 @@ public class SloveniaMap extends ApplicationAdapter {
         if (Gdx.input.isKeyJustPressed(Input.Keys.ESCAPE)) {
             showWeatherPanel = false;
             selectedCity = null;
+            particleEffectsManager.setFocusedCity(null);
         }
 
         // Clamp zoom (only if not animating, animation handles its own clamping)
@@ -504,6 +515,7 @@ public class SloveniaMap extends ApplicationAdapter {
 
                         // Animate camera to the city
                         animateCameraToCity(city);
+
                     }
                     break;
                 }
@@ -941,6 +953,9 @@ public class SloveniaMap extends ApplicationAdapter {
         // Update camera animation
         updateCameraAnimation(delta);
 
+        // Update particle effects
+        particleEffectsManager.update(delta, cities, airQualityMode);
+
         ScreenUtils.clear(0.12f, 0.15f, 0.2f, 1f);
 
         // Draw map
@@ -958,6 +973,10 @@ public class SloveniaMap extends ApplicationAdapter {
             shapeRenderer.setProjectionMatrix(camera.combined);
             mapRenderer.drawPendingLocationMarker(pendingLocation, markerPulse);
         }
+
+        // Draw particle effects BEFORE city markers so they appear behind
+        shapeRenderer.setProjectionMatrix(camera.combined);
+        particleEffectsManager.render(shapeRenderer);
 
         // Draw city markers
         shapeRenderer.setProjectionMatrix(camera.combined);
@@ -983,7 +1002,7 @@ public class SloveniaMap extends ApplicationAdapter {
         shapeRenderer.setProjectionMatrix(uiCamera.combined);
         batch.setProjectionMatrix(uiCamera.combined);
 
-        uiRenderer.drawControlHints(editMode);
+        uiRenderer.drawControlHints(editMode, particleEffectsManager.isEnabled());
 
         if (editMode) {
             uiRenderer.drawEditModeIndicator();

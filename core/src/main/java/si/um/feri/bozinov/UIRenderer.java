@@ -274,13 +274,13 @@ public class UIRenderer {
         batch.end();
     }
 
-    public void drawControlHints(boolean editMode) {
+    public void drawControlHints(boolean editMode, boolean particlesEnabled) {
         batch.begin();
         smallFont.setColor(new Color(1f, 1f, 1f, 0.7f));
         String hints = editMode ?
-            "Arrow Keys: Pan  |  +/-: Zoom  |  A: Click Map to Add  |  Click City: Edit  |  Del: Delete  |  E: Exit Edit" :
-            "Arrow Keys: Pan  |  +/-: Zoom  |  Click City: Weather Info  |  E: Edit Mode";
-        float textWidth = 700;
+            "Arrow Keys: Pan  |  +/-: Zoom  |  A: Click Map to Add  |  Click City: Edit  |  Del: Delete  |  E: Exit Edit  |  P: Particles " + (particlesEnabled ? "ON" : "OFF") :
+            "Arrow Keys: Pan  |  +/-: Zoom  |  Click City: Weather Info  |  E: Edit Mode  |  P: Particles " + (particlesEnabled ? "ON" : "OFF");
+        float textWidth = 900;
         smallFont.draw(batch, hints, (Gdx.graphics.getWidth() - textWidth) / 2, 30);
         batch.end();
     }
