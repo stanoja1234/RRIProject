@@ -1,11 +1,21 @@
 package si.um.feri.bozinov;
 
+import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Color;
+import com.badlogic.gdx.graphics.Pixmap;
+import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.Vector2;
+
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class MapRenderer {
     private static final double MIN_LON = 13.3;
@@ -18,9 +28,162 @@ public class MapRenderer {
     private ShapeRenderer shapeRenderer;
     private BitmapFont smallFont;
 
+    // Icon caching
+    private Map<String, Texture> iconCache;
+    private Map<String, byte[]> pendingIcons; // Icons downloaded but not yet converted to textures
+    private Texture defaultWeatherIcon;
+    private Map<Integer, Texture> aqiIcons;
+    private static final String ICON_BASE_URL = "https://openweathermap.org/img/wn/";
+
     public MapRenderer(ShapeRenderer shapeRenderer, BitmapFont smallFont) {
         this.shapeRenderer = shapeRenderer;
         this.smallFont = smallFont;
+        this.iconCache = new ConcurrentHashMap<>();
+        this.pendingIcons = new ConcurrentHashMap<>();
+        this.aqiIcons = new HashMap<>();
+
+        // Create default icon and AQI icons
+        createDefaultIcons();
+    }
+
+    private void createDefaultIcons() {
+        // Create a simple default weather icon
+        defaultWeatherIcon = createCircleIcon(new Color(0.7f, 0.7f, 0.8f, 1f), 64);
+
+        // Create AQI icons with different colors
+        aqiIcons.put(1, createCircleIcon(new Color(0.3f, 0.85f, 0.3f, 1f), 64)); // Good - Green
+        aqiIcons.put(2, createCircleIcon(new Color(0.8f, 0.85f, 0.3f, 1f), 64)); // Fair - Yellow
+        aqiIcons.put(3, createCircleIcon(new Color(1f, 0.7f, 0.2f, 1f), 64)); // Moderate - Orange
+        aqiIcons.put(4, createCircleIcon(new Color(1f, 0.4f, 0.3f, 1f), 64)); // Poor - Red
+        aqiIcons.put(5, createCircleIcon(new Color(0.8f, 0.2f, 0.5f, 1f), 64)); // Very Poor - Purple
+    }
+
+    private Texture createCircleIcon(Color color, int size) {
+        Pixmap pixmap = new Pixmap(size, size, Pixmap.Format.RGBA8888);
+        pixmap.setColor(new Color(0, 0, 0, 0.3f));
+        pixmap.fillCircle(size/2 + 1, size/2 - 1, size/2 - 4);
+
+        pixmap.setColor(color);
+        pixmap.fillCircle(size/2, size/2, size/2 - 4);
+
+        pixmap.setColor(color.r * 0.7f, color.g * 0.7f, color.b * 0.7f, 1f);
+        pixmap.drawCircle(size/2, size/2, size/2 - 5);
+        pixmap.drawCircle(size/2, size/2, size/2 - 6);
+
+        Texture texture = new Texture(pixmap);
+        texture.setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
+        pixmap.dispose();
+        return texture;
+    }
+
+    private byte[] downloadWeatherIconData(String iconCode) {
+        try {
+            String urlString = ICON_BASE_URL + iconCode + "@2x.png";
+            URL url = new URL(urlString);
+            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+            connection.setRequestMethod("GET");
+            connection.setRequestProperty("User-Agent", "LibGDX Weather App");
+            connection.setConnectTimeout(5000);
+            connection.setReadTimeout(5000);
+
+            int responseCode = connection.getResponseCode();
+            if (responseCode == HttpURLConnection.HTTP_OK) {
+                InputStream inputStream = connection.getInputStream();
+
+                java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
+                int bytesRead;
+                byte[] data = new byte[4096];
+                while ((bytesRead = inputStream.read(data, 0, data.length)) != -1) {
+                    buffer.write(data, 0, bytesRead);
+                }
+                buffer.flush();
+                byte[] imageData = buffer.toByteArray();
+                inputStream.close();
+
+                System.out.println("Downloaded weather icon data: " + iconCode);
+                return imageData;
+            } else {
+                System.err.println("Failed to download icon " + iconCode + ": HTTP " + responseCode);
+                return null;
+            }
+        } catch (Exception e) {
+            System.err.println("Error downloading icon " + iconCode + ": " + e.getMessage());
+            return null;
+        }
+    }
+
+    public void preloadWeatherIcons(List<City> cities) {
+        // Download icons for all cities in background
+        new Thread(() -> {
+            for (City city : cities) {
+                if (city.icon != null && !city.icon.isEmpty() &&
+                    !iconCache.containsKey(city.icon) &&
+                    !pendingIcons.containsKey(city.icon)) {
+
+                    byte[] iconData = downloadWeatherIconData(city.icon);
+                    if (iconData != null) {
+                        pendingIcons.put(city.icon, iconData);
+                    }
+
+                    try {
+                        Thread.sleep(100); // Small delay to avoid overwhelming the server
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                }
+            }
+            System.out.println("Finished downloading weather icons");
+        }).start();
+    }
+
+    public void processPendingIcons() {
+        // This must be called from the render thread
+        if (!pendingIcons.isEmpty()) {
+            // Process one icon per frame to avoid lag
+            String iconCode = pendingIcons.keySet().iterator().next();
+            byte[] imageData = pendingIcons.remove(iconCode);
+
+            if (imageData != null) {
+                try {
+                    Pixmap pixmap = new Pixmap(imageData, 0, imageData.length);
+                    Texture texture = new Texture(pixmap);
+                    texture.setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
+                    pixmap.dispose();
+
+                    iconCache.put(iconCode, texture);
+                    System.out.println("Created texture for icon: " + iconCode);
+                } catch (Exception e) {
+                    System.err.println("Failed to create texture for icon " + iconCode + ": " + e.getMessage());
+                }
+            }
+        }
+    }
+
+    private Texture getWeatherIcon(String iconCode) {
+        if (iconCode == null || iconCode.isEmpty()) {
+            return defaultWeatherIcon;
+        }
+
+        // Check if already loaded
+        if (iconCache.containsKey(iconCode)) {
+            return iconCache.get(iconCode);
+        }
+
+        // Check if download is pending
+        if (pendingIcons.containsKey(iconCode)) {
+            return defaultWeatherIcon; // Use default while waiting
+        }
+
+        // Start downloading in background
+        final String code = iconCode;
+        new Thread(() -> {
+            byte[] iconData = downloadWeatherIconData(code);
+            if (iconData != null) {
+                pendingIcons.put(code, iconData);
+            }
+        }).start();
+
+        return defaultWeatherIcon;
     }
 
     public Vector2 geoToScreen(double lat, double lon) {
@@ -37,6 +200,123 @@ public class MapRenderer {
 
     public void drawCityMarkers(List<City> cities, City selectedCity, City hoveredCity,
                                 boolean editMode, float markerPulse, boolean airQualityMode) {
+
+        // This method is deprecated, use drawCityIcons instead
+    }
+
+    public void drawCityIcons(SpriteBatch batch, List<City> cities, City selectedCity,
+                              City hoveredCity, boolean editMode, float markerPulse,
+                              boolean airQualityMode) {
+
+        // Process any pending icon textures (must be done on render thread)
+        processPendingIcons();
+
+        if (airQualityMode) {
+            // Draw old-style circular markers for air quality mode
+            drawAirQualityMarkers(cities, selectedCity, hoveredCity, editMode, markerPulse);
+        } else {
+            // Draw weather icons for weather mode
+            drawWeatherIcons(batch, cities, selectedCity, hoveredCity, editMode, markerPulse);
+        }
+    }
+
+    private void drawWeatherIcons(SpriteBatch batch, List<City> cities, City selectedCity,
+                                  City hoveredCity, boolean editMode, float markerPulse) {
+        batch.begin();
+
+        for (City city : cities) {
+            Vector2 pos = geoToScreen(city.lat, city.lon);
+            boolean isSelected = (city == selectedCity);
+            boolean isHovered = (city == hoveredCity);
+
+            // Get weather icon
+            Texture icon;
+            if (city.weatherLoaded && city.icon != null && !city.icon.isEmpty()) {
+                icon = getWeatherIcon(city.icon);
+            } else {
+                icon = defaultWeatherIcon;
+            }
+
+            // Calculate icon size
+            float baseSize = 64f;
+            float iconSize = baseSize;
+
+            if (isSelected) {
+                float pulse = 1f + (float)Math.sin(markerPulse) * 0.15f;
+                iconSize = baseSize * pulse;
+            } else if (isHovered) {
+                iconSize = baseSize * 1.2f;
+            }
+
+            float x = pos.x - iconSize / 2f;
+            float y = pos.y - iconSize / 2f;
+
+            // Draw glow/shadow for selected or hovered
+            if (isSelected || isHovered) {
+                batch.setColor(1f, 1f, 1f, 0.4f);
+                float glowSize = iconSize * 1.4f;
+                batch.draw(icon,
+                    pos.x - glowSize / 2f,
+                    pos.y - glowSize / 2f,
+                    glowSize, glowSize);
+                batch.setColor(Color.WHITE);
+            }
+
+            // Draw shadow
+            batch.setColor(0f, 0f, 0f, 0.3f);
+            batch.draw(icon, x + 2, y - 2, iconSize, iconSize);
+
+            // Draw main icon
+            batch.setColor(Color.WHITE);
+            batch.draw(icon, x, y, iconSize, iconSize);
+
+            // Draw border ring for edit mode
+            if (editMode) {
+                batch.setColor(1f, 0.8f, 0.2f, 0.6f);
+                float borderSize = iconSize * 1.15f;
+                batch.draw(icon,
+                    pos.x - borderSize / 2f,
+                    pos.y - borderSize / 2f,
+                    borderSize, borderSize);
+                batch.setColor(Color.WHITE);
+            }
+        }
+
+        batch.end();
+
+        // Draw selection/hover circles using ShapeRenderer
+        if (selectedCity != null || hoveredCity != null || editMode) {
+            shapeRenderer.begin(ShapeRenderer.ShapeType.Line);
+
+            for (City city : cities) {
+                Vector2 pos = geoToScreen(city.lat, city.lon);
+                boolean isSelected = (city == selectedCity);
+                boolean isHovered = (city == hoveredCity);
+
+                if (isSelected) {
+                    shapeRenderer.setColor(0.3f, 0.8f, 1f, 1f);
+                    Gdx.gl.glLineWidth(3f);
+                    float radius = 24 + (float)Math.sin(markerPulse) * 4;
+                    shapeRenderer.circle(pos.x, pos.y, radius, 40);
+                } else if (isHovered) {
+                    shapeRenderer.setColor(1f, 1f, 0.3f, 1f);
+                    Gdx.gl.glLineWidth(2f);
+                    shapeRenderer.circle(pos.x, pos.y, 28, 40);
+                } else if (editMode) {
+                    shapeRenderer.setColor(1f, 0.5f, 0f, 0.5f);
+                    Gdx.gl.glLineWidth(1.5f);
+                    shapeRenderer.circle(pos.x, pos.y, 26, 30);
+                }
+            }
+
+            Gdx.gl.glLineWidth(1f);
+            shapeRenderer.end();
+        }
+    }
+
+    private void drawAirQualityMarkers(List<City> cities, City selectedCity, City hoveredCity,
+                                       boolean editMode, float markerPulse) {
+        float sizeScale = 1.2f;
         shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
 
         for (City city : cities) {
@@ -44,10 +324,10 @@ public class MapRenderer {
             boolean isSelected = (city == selectedCity);
             boolean isHovered = (city == hoveredCity);
 
-            // Outer glow for selected or hovered city
+            // Outer glow
             if (isSelected || isHovered) {
-                float pulseSize = 20 + (float)Math.sin(markerPulse) * 3;
-                Color markerColor = airQualityMode ? getAQIColor(city.aqi) : getTemperatureColor(city.temperature);
+                float pulseSize = (20 + (float)Math.sin(markerPulse) * 3) ;
+                Color markerColor = getAQIColor(city.aqi);
                 shapeRenderer.setColor(markerColor.r, markerColor.g, markerColor.b, 0.3f);
                 shapeRenderer.circle(pos.x, pos.y, pulseSize);
             }
@@ -55,49 +335,37 @@ public class MapRenderer {
             // Edit mode indicator
             if (editMode) {
                 shapeRenderer.setColor(1f, 0.8f, 0.2f, 0.4f);
-                shapeRenderer.circle(pos.x, pos.y, 16);
+                shapeRenderer.circle(pos.x, pos.y, 16 * sizeScale);
             }
 
             // Shadow
             shapeRenderer.setColor(0, 0, 0, 0.4f);
-            shapeRenderer.circle(pos.x + 1, pos.y - 1, isSelected ? 14 : 10);
+            shapeRenderer.circle(pos.x + 1, pos.y - 1, (isSelected ? 14 : 10) * sizeScale);
 
-            // Main marker circle - colored by mode
-            if (airQualityMode) {
-                if (city.airQualityLoaded) {
-                    Color aqiColor = getAQIColor(city.aqi);
-                    shapeRenderer.setColor(aqiColor);
-                } else {
-                    shapeRenderer.setColor(0.6f, 0.6f, 0.65f, 1f);
-                }
+            // Main marker
+            if (city.airQualityLoaded) {
+                shapeRenderer.setColor(getAQIColor(city.aqi));
             } else {
-                if (city.weatherLoaded) {
-                    Color tempColor = getTemperatureColor(city.temperature);
-                    shapeRenderer.setColor(tempColor);
-                } else {
-                    shapeRenderer.setColor(0.6f, 0.6f, 0.65f, 1f);
-                }
+                shapeRenderer.setColor(0.6f, 0.6f, 0.65f, 1f);
             }
-            shapeRenderer.circle(pos.x, pos.y, isSelected ? 13 : 9);
+            shapeRenderer.circle(pos.x, pos.y, (isSelected ? 13 : 9) * sizeScale);
 
             // Border ring
             shapeRenderer.setColor(1f, 1f, 1f, 0.9f);
-            shapeRenderer.circle(pos.x, pos.y, isSelected ? 11 : 7.5f);
+            shapeRenderer.circle(pos.x, pos.y, (isSelected ? 11 : 7.5f) * sizeScale);
 
             // Inner core
-            if (airQualityMode && city.airQualityLoaded) {
+            if (city.airQualityLoaded) {
                 Color aqiColor = getAQIColor(city.aqi);
                 shapeRenderer.setColor(aqiColor.r * 0.8f, aqiColor.g * 0.8f, aqiColor.b * 0.8f, 1f);
-            } else if (!airQualityMode && city.weatherLoaded) {
-                Color tempColor = getTemperatureColor(city.temperature);
-                shapeRenderer.setColor(tempColor.r * 0.8f, tempColor.g * 0.8f, tempColor.b * 0.8f, 1f);
             } else {
                 shapeRenderer.setColor(0.5f, 0.5f, 0.55f, 1f);
             }
-            shapeRenderer.circle(pos.x, pos.y, isSelected ? 6 : 4);
+            shapeRenderer.circle(pos.x, pos.y, (isSelected ? 6 : 4) * sizeScale);
         }
         shapeRenderer.end();
     }
+
 
     public void drawCityLabels(SpriteBatch batch, List<City> cities, City selectedCity,
                                City hoveredCity, float cameraZoom) {
@@ -108,11 +376,11 @@ public class MapRenderer {
 
                 // Text shadow
                 smallFont.setColor(0, 0, 0, 0.7f);
-                smallFont.draw(batch, city.name, pos.x - 20 + 1, pos.y - 18 - 1);
+                smallFont.draw(batch, city.name, pos.x - 20 + 1, pos.y - 32 - 1);
 
                 // Text
                 smallFont.setColor(Color.WHITE);
-                smallFont.draw(batch, city.name, pos.x - 20, pos.y - 18);
+                smallFont.draw(batch, city.name, pos.x - 20, pos.y - 32);
             }
         }
         batch.end();
@@ -138,26 +406,49 @@ public class MapRenderer {
 
     public Color getTemperatureColor(double temp) {
         if (temp < 0) {
-            return new Color(0.3f, 0.6f, 1f, 1f); // Cool blue
+            return new Color(0.3f, 0.6f, 1f, 1f);
         } else if (temp < 10) {
-            return new Color(0.4f, 0.75f, 0.95f, 1f); // Light blue
+            return new Color(0.4f, 0.75f, 0.95f, 1f);
         } else if (temp < 20) {
-            return new Color(0.4f, 0.85f, 0.4f, 1f); // Green
+            return new Color(0.4f, 0.85f, 0.4f, 1f);
         } else if (temp < 28) {
-            return new Color(1f, 0.85f, 0.2f, 1f); // Yellow-orange
+            return new Color(1f, 0.85f, 0.2f, 1f);
         } else {
-            return new Color(1f, 0.4f, 0.3f, 1f); // Hot red
+            return new Color(1f, 0.4f, 0.3f, 1f);
         }
     }
 
     public Color getAQIColor(int aqi) {
         switch (aqi) {
-            case 1: return new Color(0.3f, 0.85f, 0.3f, 1f); // Good - Green
-            case 2: return new Color(0.8f, 0.85f, 0.3f, 1f); // Fair - Yellow
-            case 3: return new Color(1f, 0.7f, 0.2f, 1f); // Moderate - Orange
-            case 4: return new Color(1f, 0.4f, 0.3f, 1f); // Poor - Red
-            case 5: return new Color(0.8f, 0.2f, 0.5f, 1f); // Very Poor - Purple
-            default: return new Color(0.6f, 0.6f, 0.6f, 1f); // Unknown - Gray
+            case 1: return new Color(0.3f, 0.85f, 0.3f, 1f);
+            case 2: return new Color(0.8f, 0.85f, 0.3f, 1f);
+            case 3: return new Color(1f, 0.7f, 0.2f, 1f);
+            case 4: return new Color(1f, 0.4f, 0.3f, 1f);
+            case 5: return new Color(0.8f, 0.2f, 0.5f, 1f);
+            default: return new Color(0.6f, 0.6f, 0.6f, 1f);
         }
+    }
+
+    public void dispose() {
+        // Dispose all cached icons
+        if (defaultWeatherIcon != null) {
+            defaultWeatherIcon.dispose();
+        }
+
+        for (Texture icon : iconCache.values()) {
+            if (icon != null) {
+                icon.dispose();
+            }
+        }
+        iconCache.clear();
+
+        for (Texture icon : aqiIcons.values()) {
+            if (icon != null) {
+                icon.dispose();
+            }
+        }
+        aqiIcons.clear();
+
+        pendingIcons.clear();
     }
 }

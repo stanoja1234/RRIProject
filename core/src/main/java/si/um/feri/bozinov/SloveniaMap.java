@@ -180,6 +180,7 @@ public class SloveniaMap extends ApplicationAdapter {
         // Load weather and air quality data
         weatherDataManager.loadWeatherDataForAllCities(cities);
         airQualityDataManager.loadAirQualityDataForAllCities(cities);
+        mapRenderer.preloadWeatherIcons(cities);
     }
 
     private void initializeDefaultCities() {
@@ -492,6 +493,7 @@ public class SloveniaMap extends ApplicationAdapter {
                     Gdx.graphics.getHeight() - Gdx.input.getY() <= closeY + 35) {
                     showWeatherPanel = false;
                     selectedCity = null;
+                    particleEffectsManager.setFocusedCity(null);
                     return;
                 }
             }
@@ -680,8 +682,44 @@ public class SloveniaMap extends ApplicationAdapter {
         content.add(staticCheckBox).left().padBottom(20);
         content.row();
 
+        // Icon selection dropdown
+        final SelectBox<String> iconSelectBox = new SelectBox<String>(skin);
+        String[] iconOptions = {
+            "Clear Sky",
+            "Few Clouds",
+            "Scattered Clouds",
+            "Broken Clouds",
+            "Rain",
+            "Thunderstorm",
+            "Snow",
+            "Mist"
+        };
+        iconSelectBox.setItems(iconOptions);
+
+        // Set current icon selection based on city's icon data
+        if (city.icon != null) {
+            switch (city.icon) {
+                case "01d": iconSelectBox.setSelected("Clear Sky"); break;
+                case "02d": iconSelectBox.setSelected("Few Clouds"); break;
+                case "03d": iconSelectBox.setSelected("Scattered Clouds"); break;
+                case "04d": iconSelectBox.setSelected("Broken Clouds"); break;
+                case "10d": iconSelectBox.setSelected("Rain"); break;
+                case "11d": iconSelectBox.setSelected("Thunderstorm"); break;
+                case "13d": iconSelectBox.setSelected("Snow"); break;
+                case "50d": iconSelectBox.setSelected("Mist"); break;
+                default: iconSelectBox.setSelected("Clear Sky"); break;
+            }
+        } else {
+            iconSelectBox.setSelected("Clear Sky");
+        }
+
+        content.add(new Label("Weather Icon:", skin)).left().padBottom(5);
+        content.row();
+        content.add(iconSelectBox).width(300).padBottom(20);
+        content.row();
+
         // Data fields based on mode
-        final TextField tempField, humidityField, pressureField, windSpeedField;
+        final TextField tempField, humidityField, pressureField, windSpeedField, descriptionField;
         final TextField aqiField, no2Field, o3Field, pm25Field;
 
         if (airQualityMode) {
@@ -701,7 +739,7 @@ public class SloveniaMap extends ApplicationAdapter {
             no2Field = new TextField(
                 city.airQualityLoaded ? String.format("%.2f", city.no2) : "0.0", skin);
             no2Field.setDisabled(!city.isStatic);
-            content.add(new Label("NO₂ (μg/m³):", skin)).left().padBottom(5);
+            content.add(new Label("NO₂ ", skin)).left().padBottom(5);
             content.row();
             content.add(no2Field).width(300).padBottom(10);
             content.row();
@@ -709,7 +747,7 @@ public class SloveniaMap extends ApplicationAdapter {
             o3Field = new TextField(
                 city.airQualityLoaded ? String.format("%.2f", city.o3) : "0.0", skin);
             o3Field.setDisabled(!city.isStatic);
-            content.add(new Label("O₃ (μg/m³):", skin)).left().padBottom(5);
+            content.add(new Label("O₃ :", skin)).left().padBottom(5);
             content.row();
             content.add(o3Field).width(300).padBottom(10);
             content.row();
@@ -717,7 +755,7 @@ public class SloveniaMap extends ApplicationAdapter {
             pm25Field = new TextField(
                 city.airQualityLoaded ? String.format("%.2f", city.pm2_5) : "0.0", skin);
             pm25Field.setDisabled(!city.isStatic);
-            content.add(new Label("PM2.5 (μg/m³):", skin)).left().padBottom(5);
+            content.add(new Label("PM2.5 :", skin)).left().padBottom(5);
             content.row();
             content.add(pm25Field).width(300).padBottom(10);
             content.row();
@@ -726,6 +764,7 @@ public class SloveniaMap extends ApplicationAdapter {
             humidityField = null;
             pressureField = null;
             windSpeedField = null;
+            descriptionField = null;
 
         } else {
             Label weatherLabel = new Label("Weather Data:", skin);
@@ -765,6 +804,15 @@ public class SloveniaMap extends ApplicationAdapter {
             content.add(windSpeedField).width(300).padBottom(10);
             content.row();
 
+
+            descriptionField = new TextField(
+                city.weatherLoaded && city.description != null ? city.description : "", skin);
+            descriptionField.setDisabled(!city.isStatic);
+            content.add(new Label("Description:", skin)).left().padBottom(5);
+            content.row();
+            content.add(descriptionField).width(300).padBottom(10);
+            content.row();
+
             aqiField = null;
             no2Field = null;
             o3Field = null;
@@ -785,6 +833,7 @@ public class SloveniaMap extends ApplicationAdapter {
                     if (humidityField != null) humidityField.setDisabled(!isStatic);
                     if (pressureField != null) pressureField.setDisabled(!isStatic);
                     if (windSpeedField != null) windSpeedField.setDisabled(!isStatic);
+                    if (descriptionField != null) descriptionField.setDisabled(!isStatic);
                 }
             }
         });
@@ -817,6 +866,20 @@ public class SloveniaMap extends ApplicationAdapter {
                     city.lon = newLon;
                     city.isStatic = staticCheckBox.isChecked();
 
+                    // Save selected icon
+                    String selectedIcon = iconSelectBox.getSelected();
+                    switch (selectedIcon) {
+                        case "Clear Sky": city.icon = "01d"; break;
+                        case "Few Clouds": city.icon = "02d"; break;
+                        case "Scattered Clouds": city.icon = "03d"; break;
+                        case "Broken Clouds": city.icon = "04d"; break;
+                        case "Rain": city.icon = "10d"; break;
+                        case "Thunderstorm": city.icon = "11d"; break;
+                        case "Snow": city.icon = "13d"; break;
+                        case "Mist": city.icon = "50d"; break;
+                        default: city.icon = "01d"; break;
+                    }
+
                     if (city.isStatic) {
                         try {
                             if (airQualityMode) {
@@ -830,6 +893,7 @@ public class SloveniaMap extends ApplicationAdapter {
                                 city.humidity = Integer.parseInt(humidityField.getText().trim());
                                 city.pressure = Integer.parseInt(pressureField.getText().trim());
                                 city.windSpeed = Double.parseDouble(windSpeedField.getText().trim());
+                                city.description = descriptionField.getText().trim();
                                 city.weatherLoaded = true;
                             }
                         } catch (NumberFormatException e) {
@@ -941,80 +1005,81 @@ public class SloveniaMap extends ApplicationAdapter {
     }
 
     @Override
-    public void render() {
-        handleInput();
+        public void render() {
+            handleInput();
 
-        float delta = Gdx.graphics.getDeltaTime();
-        markerPulse += delta * 2f;
-        if (showWeatherPanel && panelAnimationProgress < 1f) {
-            panelAnimationProgress = Math.min(1f, panelAnimationProgress + delta * 4f);
-        }
+            float delta = Gdx.graphics.getDeltaTime();
+            markerPulse += delta * 2f;
+            if (showWeatherPanel && panelAnimationProgress < 1f) {
+                panelAnimationProgress = Math.min(1f, panelAnimationProgress + delta * 4f);
+            }
 
-        // Update camera animation
-        updateCameraAnimation(delta);
+            // Update camera animation
+            updateCameraAnimation(delta);
 
-        // Update particle effects
-        particleEffectsManager.update(delta, cities, airQualityMode);
+            // Update particle effects
+            particleEffectsManager.update(delta, cities, airQualityMode);
 
-        ScreenUtils.clear(0.12f, 0.15f, 0.2f, 1f);
+            ScreenUtils.clear(0.12f, 0.15f, 0.2f, 1f);
 
-        // Draw map
-        batch.setProjectionMatrix(camera.combined);
-        batch.begin();
-        if (mapTexture != null) {
-            batch.setColor(0.95f, 0.95f, 0.95f, 1f);
-            batch.draw(mapTexture, 0, 0, MAP_WIDTH, MAP_HEIGHT);
-            batch.setColor(Color.WHITE);
-        }
-        batch.end();
+            // Draw map
+            batch.setProjectionMatrix(camera.combined);
+            batch.begin();
+            if (mapTexture != null) {
+                batch.setColor(0.95f, 0.95f, 0.95f, 1f);
+                batch.draw(mapTexture, 0, 0, MAP_WIDTH, MAP_HEIGHT);
+                batch.setColor(Color.WHITE);
+            }
+            batch.end();
 
-        // Draw pending location marker
-        if (awaitingLocationClick && pendingLocation != null) {
+            // Draw pending location marker
+            if (awaitingLocationClick && pendingLocation != null) {
+                shapeRenderer.setProjectionMatrix(camera.combined);
+                mapRenderer.drawPendingLocationMarker(pendingLocation, markerPulse);
+            }
+
+            // Draw particle effects BEFORE city markers so they appear behind
             shapeRenderer.setProjectionMatrix(camera.combined);
-            mapRenderer.drawPendingLocationMarker(pendingLocation, markerPulse);
-        }
+            particleEffectsManager.render(shapeRenderer);
 
-        // Draw particle effects BEFORE city markers so they appear behind
-        shapeRenderer.setProjectionMatrix(camera.combined);
-        particleEffectsManager.render(shapeRenderer);
+            // Draw city icons (CHANGED - was drawCityMarkers)
+            batch.setProjectionMatrix(camera.combined);
+            shapeRenderer.setProjectionMatrix(camera.combined);
+            mapRenderer.drawCityIcons(batch, cities, selectedCity, hoveredCity, editMode, markerPulse, airQualityMode);
 
-        // Draw city markers
-        shapeRenderer.setProjectionMatrix(camera.combined);
-        mapRenderer.drawCityMarkers(cities, selectedCity, hoveredCity, editMode, markerPulse, airQualityMode);
+            // Draw city labels
+            batch.setProjectionMatrix(camera.combined);
+            mapRenderer.drawCityLabels(batch, cities, selectedCity, hoveredCity, camera.zoom);
 
-        // Draw city labels
-        batch.setProjectionMatrix(camera.combined);
-        mapRenderer.drawCityLabels(batch, cities, selectedCity, hoveredCity, camera.zoom);
+            // Draw weather/air quality panel
+            if (showWeatherPanel && selectedCity != null && !editMode) {
+                shapeRenderer.setProjectionMatrix(uiCamera.combined);
+                batch.setProjectionMatrix(uiCamera.combined);
 
-        // Draw weather/air quality panel
-        if (showWeatherPanel && selectedCity != null && !editMode) {
+                if (airQualityMode && selectedCity.airQualityLoaded) {
+                    uiRenderer.drawAirQualityPanel(selectedCity, panelAnimationProgress, markerPulse, mapRenderer);
+                } else if (!airQualityMode && selectedCity.weatherLoaded) {
+                    uiRenderer.drawWeatherPanel(selectedCity, panelAnimationProgress, markerPulse, mapRenderer);
+                }
+            }
+
+            // Draw UI elements
             shapeRenderer.setProjectionMatrix(uiCamera.combined);
             batch.setProjectionMatrix(uiCamera.combined);
 
-            if (airQualityMode && selectedCity.airQualityLoaded) {
-                uiRenderer.drawAirQualityPanel(selectedCity, panelAnimationProgress, markerPulse, mapRenderer);
-            } else if (!airQualityMode && selectedCity.weatherLoaded) {
-                uiRenderer.drawWeatherPanel(selectedCity, panelAnimationProgress, markerPulse, mapRenderer);
+            uiRenderer.drawControlHints(editMode, particleEffectsManager.isEnabled());
+
+            if (editMode) {
+                uiRenderer.drawEditModeIndicator();
             }
+
+            if (awaitingLocationClick) {
+                uiRenderer.drawLocationSelectionIndicator(markerPulse);
+            }
+
+            stage.act(delta);
+            stage.draw();
         }
-
-        // Draw UI elements
-        shapeRenderer.setProjectionMatrix(uiCamera.combined);
-        batch.setProjectionMatrix(uiCamera.combined);
-
-        uiRenderer.drawControlHints(editMode, particleEffectsManager.isEnabled());
-
-        if (editMode) {
-            uiRenderer.drawEditModeIndicator();
-        }
-
-        if (awaitingLocationClick) {
-            uiRenderer.drawLocationSelectionIndicator(markerPulse);
-        }
-
-        stage.act(delta);
-        stage.draw();
-    }
 
     @Override
     public void resize(int width, int height) {

@@ -100,10 +100,20 @@ public class ParticleEffectsManager {
 //            particles.add(createFogParticle(cityPos));
 //        }
         // Cloud particles for cloudy weather
-         if (description.contains("cloud")) {
+         else if (description.contains("cloud")) {
             if (MathUtils.random() < 0.3f) { // 30% chance
                 particles.add(createCloudParticle(cityPos, city.windSpeed));
             }
+        }
+        else if (description.contains("thunder")) {
+            int count = 5;
+            for (int i = 0; i < count; i++) {
+                particles.add(createRainParticle(cityPos, city.windSpeed));
+            }
+            if (MathUtils.random() < 0.3f) { // 30% chance
+                particles.add(createCloudParticle(cityPos, city.windSpeed));
+            }
+
         }
         // Heat shimmer for hot weather
         else if (temp > 28) {
@@ -118,6 +128,7 @@ public class ParticleEffectsManager {
                 particles.add(createWindParticle(cityPos, city.windSpeed));
             }
         }
+
     }
 
     private void spawnAirQualityParticles(City city, Vector2 cityPos) {
@@ -131,12 +142,6 @@ public class ParticleEffectsManager {
             }
         }
 
-        // Spawn smog for high PM2.5
-        if (city.pm2_5 > 15) {
-            if (MathUtils.random() < 0.3f) {
-                particles.add(createSmogParticle(cityPos, city.pm2_5));
-            }
-        }
 
         // Good air quality - clean sparkles
         if (aqi == 1) {
@@ -191,7 +196,8 @@ public class ParticleEffectsManager {
         float x = cityPos.x + offsetX;
         float y = cityPos.y + offsetY;
 
-        float velocityX = (float) windSpeed * 2f + MathUtils.random(-2f, 2f);
+        float windEffect = (float) windSpeed * 0.8f;
+        float velocityX = MathUtils.random(-10f, 10f) + windEffect;
 
         return new CloudParticle(x, y, velocityX);
     }
@@ -229,14 +235,7 @@ public class ParticleEffectsManager {
         return new PollutionParticle(x, y, velocityY, aqi);
     }
 
-    private Particle createSmogParticle(Vector2 cityPos, double pm25) {
-        float offsetX = MathUtils.random(-70f, 70f);
-        float offsetY = MathUtils.random(-40f, 40f);
-        float x = cityPos.x + offsetX;
-        float y = cityPos.y + offsetY;
 
-        return new SmogParticle(x, y, (float) pm25);
-    }
 
     private Particle createCleanAirParticle(Vector2 cityPos) {
         float offsetX = MathUtils.random(-45f, 45f);

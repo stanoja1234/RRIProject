@@ -206,11 +206,11 @@ public class UIRenderer {
     }
 
     private void drawAirQualityInfo(City city, float textX, float textY) {
-        drawInfoCard("PM2.5", String.format("%.1f μg/m³", city.pm2_5), textX, textY);
+        drawInfoCard("PM2.5", String.format("%.1f ", city.pm2_5), textX, textY);
         textY -= 50;
-        drawInfoCard("Ozone (O₃)", String.format("%.1f μg/m³", city.o3), textX, textY);
+        drawInfoCard("Ozone ", String.format("%.1f ", city.o3), textX, textY);
         textY -= 50;
-        drawInfoCard("NO₂", String.format("%.1f μg/m³", city.no2), textX, textY);
+        drawInfoCard("NO", String.format("%.1f ", city.no2), textX, textY);
         textY -= 50;
         drawInfoCard("Location", String.format("%.2f N, %.2f E", city.lat, city.lon), textX, textY);
     }
