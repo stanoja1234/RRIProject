@@ -135,8 +135,8 @@ public class ParticleEffectsManager {
         int aqi = city.aqi;
 
         // Spawn pollution particles based on AQI level
-        if (aqi >= 3) { // Moderate or worse
-            int count = (aqi - 2); // 1 for moderate, 2 for poor, 3 for very poor
+        if (aqi >= 2) { // Moderate or worse
+            int count = (aqi - 1); // 1 for moderate, 2 for poor, 3 for very poor
             for (int i = 0; i < count; i++) {
                 particles.add(createPollutionParticle(cityPos, aqi, city.pm2_5));
             }
@@ -225,8 +225,8 @@ public class ParticleEffectsManager {
     // ===== AIR QUALITY PARTICLE CREATORS =====
 
     private Particle createPollutionParticle(Vector2 cityPos, int aqi, double pm25) {
-        float offsetX = MathUtils.random(-50f, 50f);
-        float offsetY = MathUtils.random(-30f, 30f);
+        float offsetX = MathUtils.random(-45f, 45f);
+        float offsetY = MathUtils.random(-45f, 45f);
         float x = cityPos.x + offsetX;
         float y = cityPos.y + offsetY;
 
@@ -461,7 +461,7 @@ public class ParticleEffectsManager {
         public PollutionParticle(float x, float y, float velocityY, int aqi) {
             super(x, y, 6f);
             this.velocityY = velocityY;
-            this.size = MathUtils.random(3f, 7f);
+            this.size = MathUtils.random(2f, 4f);
             this.driftPhase = MathUtils.random(0f, MathUtils.PI2);
 
             // Color based on AQI
